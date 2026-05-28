@@ -1,0 +1,8 @@
+# USE PNPM!!!
+package-lock.json
+yarn.lock
+bun.lockb
+
+.DS_Store
+
+node_modules
