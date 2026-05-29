@@ -4,7 +4,7 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractApplicationVersion, needsDeviceDetails, normalizeDashboard, rawEntityId, selectAccessPointDevices } from "../lib/normalize";
+import { extractApplicationVersion, getFirst, integrationDeviceId, isRecord, needsDeviceDetails, normalizeDashboard, selectAccessPointDevices, stableDeviceKey } from "../lib/normalize";
 import { toSafeErrorMessage, UniFiClient, type RawRecord } from "../lib/unifi";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,6 +14,7 @@ const isProduction = process.env.NODE_ENV === "production";
 const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 3000);
 const FOX_WALLPAPER_URL = "https://randomfox.ca/floof/";
+const debugUniFiRaw = process.env.DEBUG_UNIFI_RAW === "1" || process.env.DEBUG_UNIFI_RAW?.toLowerCase() === "true";
 
 interface FoxWallpaper {
 	image: string;
@@ -31,10 +32,10 @@ function rejectedWarning(label: string, result: PromiseSettledResult<unknown>) {
 	return result.status === "rejected" ? `${label}: ${toSafeErrorMessage(result.reason)}` : undefined;
 }
 
-async function settledMap<T>(items: RawRecord[], loader: (item: RawRecord) => Promise<T>) {
+async function settledMap<T>(items: RawRecord[], keyer: (item: RawRecord) => string, loader: (item: RawRecord) => Promise<T>) {
 	const results = await Promise.allSettled(
 		items.map(async item => {
-			const id = rawEntityId(item);
+			const id = keyer(item);
 			return [id, await loader(item)] as const;
 		})
 	);
@@ -50,6 +51,23 @@ async function settledMap<T>(items: RawRecord[], loader: (item: RawRecord) => Pr
 	}
 
 	return { map, warnings };
+}
+
+function debugApOverview(device: RawRecord | undefined) {
+	if (!device) {
+		return undefined;
+	}
+
+	return {
+		id: integrationDeviceId(device),
+		name: getFirst(device, ["name", "displayName", "hostname", "deviceName"]),
+		macAddress: getFirst(device, ["macAddress", "mac"])
+	};
+}
+
+function debugStatsUplink(stats: RawRecord | undefined) {
+	const uplink = stats?.uplink;
+	return isRecord(uplink) ? uplink : undefined;
 }
 
 const app = express();
@@ -134,11 +152,11 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 		const legacyEvents = fulfilledValue(legacyEventsResult) ?? [];
 		const apTargets = selectAccessPointDevices(devices);
 		const visibleApTargets = apTargets.length > 0 ? apTargets : devices.slice(0, 3);
-		const detailTargets = visibleApTargets.filter(device => rawEntityId(device) !== "unknown" && needsDeviceDetails(device));
-		const statsTargets = visibleApTargets.filter(device => rawEntityId(device) !== "unknown");
+		const detailTargets = visibleApTargets.filter(device => integrationDeviceId(device) && needsDeviceDetails(device));
+		const statsTargets = visibleApTargets.filter(device => integrationDeviceId(device));
 		const [detailsResult, statsResult] = await Promise.allSettled([
-			settledMap(detailTargets, device => client.getDevice(site.id, rawEntityId(device))),
-			settledMap(statsTargets, device => client.getDeviceStatisticsLatest(site.id, rawEntityId(device)))
+			settledMap(detailTargets, stableDeviceKey, device => client.getDevice(site.id, integrationDeviceId(device)!)),
+			settledMap(statsTargets, stableDeviceKey, device => client.getDeviceStatisticsLatest(site.id, integrationDeviceId(device)!))
 		]);
 
 		const deviceDetailsById = fulfilledValue(detailsResult)?.map ?? new Map<string, RawRecord>();
@@ -156,23 +174,42 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 			warnings.push(`Latest device statistics unavailable: ${toSafeErrorMessage(statsResult.reason)}`);
 		}
 
-		response.json(
-			normalizeDashboard({
-				refreshedAt,
-				pollMs: client.config.pollMs,
-				controllerHostOnly: client.controllerHostOnly,
-				applicationInfo: fulfilledValue(infoResult),
-				site,
-				devices,
-				deviceDetailsById,
-				deviceStatsById,
-				clients,
-				wifiBroadcasts,
-				networks,
-				legacyEvents,
-				warnings
-			})
-		);
+		const dashboard = normalizeDashboard({
+			refreshedAt,
+			pollMs: client.config.pollMs,
+			controllerHostOnly: client.controllerHostOnly,
+			applicationInfo: fulfilledValue(infoResult),
+			site,
+			devices,
+			deviceDetailsById,
+			deviceStatsById,
+			clients,
+			wifiBroadcasts,
+			networks,
+			legacyEvents,
+			warnings
+		});
+
+		if (!isProduction || debugUniFiRaw) {
+			const firstAp = visibleApTargets[0];
+			const firstApKey = firstAp ? stableDeviceKey(firstAp) : undefined;
+			const firstApStats = firstApKey ? deviceStatsById.get(firstApKey) : undefined;
+			response.json({
+				...dashboard,
+				_debug: {
+					firstAp: debugApOverview(firstAp),
+					statisticsTopLevelKeys: firstApStats ? Object.keys(firstApStats).sort() : [],
+					statisticsUplink: debugStatsUplink(firstApStats),
+					normalizedThroughput: {
+						uploadBps: dashboard.aps[0]?.uploadBps ?? 0,
+						downloadBps: dashboard.aps[0]?.downloadBps ?? 0
+					}
+				}
+			});
+			return;
+		}
+
+		response.json(dashboard);
 	} catch (error) {
 		response.status(503).json({
 			error: toSafeErrorMessage(error)

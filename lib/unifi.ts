@@ -130,6 +130,14 @@ function getFirst(record: RawRecord, keys: string[]) {
 	return undefined;
 }
 
+function unwrapDataRecord(json: unknown): RawRecord {
+	if (!isRecord(json)) {
+		return {};
+	}
+
+	return isRecord(json.data) ? json.data : json;
+}
+
 function collectionFromResponse<T>(json: unknown): CollectionPage<T> {
 	if (Array.isArray(json)) {
 		return { items: json as T[], count: json.length };
@@ -335,8 +343,9 @@ export class UniFiClient {
 		return this.requestJson<RawRecord>(`/sites/${encodeURIComponent(siteId)}/devices/${encodeURIComponent(deviceId)}`, { cacheTtlMs: 15_000 });
 	}
 
-	getDeviceStatisticsLatest(siteId: string, deviceId: string) {
-		return this.requestJson<RawRecord>(`/sites/${encodeURIComponent(siteId)}/devices/${encodeURIComponent(deviceId)}/statistics/latest`);
+	async getDeviceStatisticsLatest(siteId: string, deviceId: string) {
+		const json = await this.requestJson<unknown>(`/sites/${encodeURIComponent(siteId)}/devices/${encodeURIComponent(deviceId)}/statistics/latest`);
+		return unwrapDataRecord(json);
 	}
 
 	getClients(siteId: string) {

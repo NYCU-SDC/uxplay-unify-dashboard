@@ -143,8 +143,19 @@ function positiveNumber(value: unknown) {
 	return number === undefined ? undefined : Math.max(0, number);
 }
 
+export function integrationDeviceId(raw: RawRecord) {
+	const record = unwrapDataRecord(raw);
+	return asString(getFirst(record, ["id"]));
+}
+
+export function stableDeviceKey(raw: RawRecord) {
+	const record = unwrapDataRecord(raw);
+	return asString(getFirst(record, ["id", "mac", "macAddress", "_id", "deviceId", "name"])) ?? "unknown";
+}
+
 export function rawEntityId(raw: RawRecord) {
-	return asString(getFirst(raw, ["id", "_id", "deviceId", "clientId", "mac", "macAddress"])) ?? "unknown";
+	const record = unwrapDataRecord(raw);
+	return asString(getFirst(record, ["id", "_id", "deviceId", "clientId", "mac", "macAddress"])) ?? "unknown";
 }
 
 function normalizeMac(mac?: string) {
@@ -281,6 +292,16 @@ function readRate(objects: unknown[], direction: "download" | "upload") {
 	];
 
 	return positiveNumber(firstNestedAcross(objects, direction === "download" ? downloadPaths : uploadPaths));
+}
+
+function readApUplinkRate(stats: RawRecord | undefined, direction: "download" | "upload") {
+	if (!stats) {
+		return 0;
+	}
+
+	const record = unwrapDataRecord(stats);
+	const field = direction === "download" ? "rxRateBps" : "txRateBps";
+	return positiveNumber(getNestedFirst(record, [["uplink", field]])) ?? 0;
 }
 
 function readBytes(objects: unknown[], direction: "download" | "upload") {
@@ -459,7 +480,7 @@ function isOnline(raw: RawRecord) {
 
 function normalizeAccessPoint(rawDevice: RawRecord, stats: RawRecord | undefined, now: Date, clients: ClientSummary[]): AccessPointSummary {
 	const sources = expandSources([stats, rawDevice]);
-	const id = rawEntityId(rawDevice);
+	const id = stableDeviceKey(rawDevice);
 	const model = asString(
 		getFirst(rawDevice, ["model", "modelName", "shortname", "displayModel", "productName"]) ??
 			getNestedFirst(rawDevice, [
@@ -468,11 +489,8 @@ function normalizeAccessPoint(rawDevice: RawRecord, stats: RawRecord | undefined
 			])
 	);
 	const name = asString(getFirst(rawDevice, ["name", "displayName", "hostname", "deviceName"])) ?? model ?? id;
-	const downloadBytes = readBytes(sources, "download");
-	const uploadBytes = readBytes(sources, "upload");
-	const derived = deriveRates(`ap:${id}`, now, downloadBytes, uploadBytes);
-	const downloadBps = readRate(sources, "download") ?? derived.downloadBps;
-	const uploadBps = readRate(sources, "upload") ?? derived.uploadBps;
+	const downloadBps = readApUplinkRate(stats, "download");
+	const uploadBps = readApUplinkRate(stats, "upload");
 	const clientCount = clients.filter(client => client.apId === id).length;
 
 	return {
@@ -890,11 +908,13 @@ export function normalizeDashboard(input: NormalizeDashboardInput): DashboardDat
 	const apIdByMac = new Map<string, string>();
 
 	for (const raw of apRawDevices) {
-		const merged = mergeDevice(raw, input.deviceDetailsById?.get(rawEntityId(raw)));
-		const id = rawEntityId(merged);
+		const rawKey = stableDeviceKey(raw);
+		const merged = mergeDevice(raw, input.deviceDetailsById?.get(rawKey));
+		const id = stableDeviceKey(merged);
 		const mac = normalizeMac(asString(getFirst(merged, ["mac", "macAddress"])));
-		const provisional = normalizeAccessPoint(merged, input.deviceStatsById?.get(id), now, []);
+		const provisional = normalizeAccessPoint(merged, input.deviceStatsById?.get(rawKey) ?? input.deviceStatsById?.get(id), now, []);
 		apById.set(id, provisional);
+		apById.set(rawKey, provisional);
 		if (mac) {
 			apIdByMac.set(mac, id);
 		}
@@ -902,10 +922,12 @@ export function normalizeDashboard(input: NormalizeDashboardInput): DashboardDat
 
 	const clients = input.clients.map(client => normalizeClient(client, now, apById, apIdByMac)).sort((a, b) => b.activityBps - a.activityBps);
 	const aps = apRawDevices.map(raw => {
-		const merged = mergeDevice(raw, input.deviceDetailsById?.get(rawEntityId(raw)));
-		const id = rawEntityId(merged);
-		const normalized = normalizeAccessPoint(merged, input.deviceStatsById?.get(id), now, clients);
+		const rawKey = stableDeviceKey(raw);
+		const merged = mergeDevice(raw, input.deviceDetailsById?.get(rawKey));
+		const id = stableDeviceKey(merged);
+		const normalized = normalizeAccessPoint(merged, input.deviceStatsById?.get(rawKey) ?? input.deviceStatsById?.get(id), now, clients);
 		apById.set(id, normalized);
+		apById.set(rawKey, normalized);
 		return normalized;
 	});
 
@@ -915,8 +937,8 @@ export function normalizeDashboard(input: NormalizeDashboardInput): DashboardDat
 	const clientUploadBps = clients.reduce((sum, client) => sum + client.uploadBps, 0);
 	const apDownloadBps = aps.reduce((sum, ap) => sum + (ap.downloadBps ?? 0), 0);
 	const apUploadBps = aps.reduce((sum, ap) => sum + (ap.uploadBps ?? 0), 0);
-	const totalDownloadBps = clientDownloadBps > 0 ? clientDownloadBps : apDownloadBps;
-	const totalUploadBps = clientUploadBps > 0 ? clientUploadBps : apUploadBps;
+	const totalDownloadBps = aps.length > 0 ? apDownloadBps : clientDownloadBps;
+	const totalUploadBps = aps.length > 0 ? apUploadBps : clientUploadBps;
 	const usageValues = clients.map(client => client.usage24hBytes).filter((value): value is number => value !== undefined);
 	const health = healthFrom(aps, clients);
 	const events = (input.legacyEvents ?? [])
