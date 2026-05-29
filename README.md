@@ -19,26 +19,28 @@
 - Dashboard server：跑這個專案，負責提供網頁和 `/api/*`。
 - Raspberry Pi：只負責開機後全螢幕打開 dashboard URL。
 
-範例：
+目前 SDC 的部署：
 
 ```text
-UniFi Controller / UniFi OS
-        ↑
-Dashboard Server: http://10.1.253.10:3000
-        ↑
-Raspberry Pi Chromium Kiosk
+UniFi OS Server: https://127.0.0.1:11443
+        ↑ local backend fetch
+Dashboard Server: https://uxplay.sdc.nycu.club
+        ↑ HTTPS
+Raspberry Pi Chromium Kiosk: sdcux
 ```
+
+實際服務放在 `ui` 伺服器，Node app 只 listen `127.0.0.1:3000`，對外由 Nginx 提供 HTTPS。
 
 ## 伺服器環境變數
 
 在 dashboard server 上建立 `.env`：
 
 ```bash
-UNIFI_BASE_URL=https://ui.sdc.nycu.club
+UNIFI_BASE_URL=https://127.0.0.1:11443
 UNIFI_API_KEY=你的 UniFi API key
 
-# 直接給區網內的 Raspberry Pi 連線時用 0.0.0.0
-HOST=0.0.0.0
+# 由 Nginx 反向代理時只 listen localhost
+HOST=127.0.0.1
 PORT=3000
 
 UNIFI_SITE_ID=
@@ -48,10 +50,10 @@ ENABLE_UNIFI_LEGACY=false
 DASHBOARD_POLL_MS=5000
 ```
 
-如果你會用 Nginx / Caddy / Cloudflare Tunnel 反向代理，`HOST` 可以改成：
+如果你不使用 Nginx，想直接讓 Raspberry Pi 連 Node app，才改成：
 
 ```bash
-HOST=127.0.0.1
+HOST=0.0.0.0
 PORT=3000
 ```
 
@@ -77,7 +79,7 @@ curl -k -H "X-API-KEY: $UNIFI_API_KEY" -H "Accept: application/json" \
   "$UNIFI_BASE_URL/proxy/network/integration/v1/sites"
 ```
 
-## Dashboard 伺服器部署
+## Dashboard 伺服器部署（pnpm）
 
 以下以 Debian / Ubuntu server 為例。
 
@@ -96,12 +98,12 @@ corepack prepare pnpm@11.4.0 --activate
 pnpm --version
 ```
 
-下載專案：
+下載專案。SDC 目前部署在 `/home/ubuntu/.local/src/unifi-ap-dashboard`；新機器也可以放在 `/opt/unifi-ap-dashboard`：
 
 ```bash
 sudo mkdir -p /opt/unifi-ap-dashboard
 sudo chown "$USER":"$USER" /opt/unifi-ap-dashboard
-git clone https://github.com/NYCU-SDC/uxplay-unify-dashboard /opt/unifi-ap-dashboard
+git clone https://github.com/elvisdragonmao/unify-ap-dashboard.git /opt/unifi-ap-dashboard
 cd /opt/unifi-ap-dashboard
 ```
 
@@ -175,7 +177,7 @@ systemctl status unifi-dashboard.service
 journalctl -u unifi-dashboard.service -f
 ```
 
-## 可選：Nginx 反向代理
+## Nginx / HTTPS 反向代理
 
 如果你想用 `http://dashboard.local` 或 HTTPS，建議讓 app 只 listen localhost：
 
@@ -184,12 +186,25 @@ HOST=127.0.0.1
 PORT=3000
 ```
 
-Nginx 範例：
+`uxplay.sdc.nycu.club` 範例：
 
 ```nginx
 server {
     listen 80;
-    server_name dashboard.local;
+    listen [::]:80;
+    server_name uxplay.sdc.nycu.club;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name uxplay.sdc.nycu.club;
+
+    ssl_certificate /etc/letsencrypt/live/uxplay.sdc.nycu.club/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/uxplay.sdc.nycu.club/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -200,6 +215,16 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+```
+
+因為 `uxplay.sdc.nycu.club` 目前公開 DNS 指到私有 IP，Let’s Encrypt HTTP-01 不能驗證。要簽正式憑證請使用 DNS-01，例如 Cloudflare plugin：
+
+```bash
+sudo certbot certonly \
+  --dns-cloudflare \
+  --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini \
+  --dns-cloudflare-propagation-seconds 30 \
+  -d uxplay.sdc.nycu.club
 ```
 
 套用：
@@ -213,23 +238,19 @@ sudo systemctl reload nginx
 
 Raspberry Pi 不需要放 UniFi API key，也不需要跑這個專案。它只要開 Chromium kiosk。
 
+SDC 目前的 Pi 使用 Raspberry Pi OS/labwc，Chromium 指令是 `chromium`。
+
+先測試 Pi 能看到 dashboard：
+
+```bash
+curl -I https://uxplay.sdc.nycu.club
+```
+
 安裝套件：
 
 ```bash
 sudo apt update
-sudo apt install -y chromium-browser unclutter x11-xserver-utils
-```
-
-如果你的系統套件名稱是 `chromium`：
-
-```bash
-sudo apt install -y chromium
-```
-
-確認 Chromium 指令：
-
-```bash
-command -v chromium-browser || command -v chromium
+sudo apt install -y chromium x11-xserver-utils
 ```
 
 設定開機自動登入桌面：
@@ -242,9 +263,28 @@ sudo raspi-config
 
 - `System Options -> Boot / Auto Login -> Desktop Autologin`
 - `Display Options -> Screen Blanking -> No`
-- 如果 kiosk 顯示有問題，改用 `Advanced Options -> Wayland -> X11`
 
-建立 Chromium kiosk autostart：
+建立 labwc autostart：
+
+```bash
+mkdir -p ~/.config/labwc
+tee ~/.config/labwc/autostart >/dev/null <<'EOF'
+#!/bin/sh
+xset s off -dpms 2>/dev/null || true
+chromium \
+  --kiosk \
+  --start-fullscreen \
+  --ozone-platform=wayland \
+  --noerrdialogs \
+  --disable-infobars \
+  --disable-session-crashed-bubble \
+  --overscroll-history-navigation=0 \
+  --disable-pinch \
+  https://uxplay.sdc.nycu.club >/tmp/sdc-dashboard-kiosk.log 2>&1 &
+EOF
+```
+
+同時建立 XDG autostart，讓 X11/LXDE 環境也能啟動：
 
 ```bash
 mkdir -p ~/.config/autostart
@@ -252,25 +292,16 @@ tee ~/.config/autostart/sdc-dashboard-kiosk.desktop >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=SDC Dashboard Kiosk
-Exec=sh -lc 'xset s off -dpms; unclutter -idle 0.5 -root & chromium-browser --kiosk --noerrdialogs --disable-infobars --disable-session-crashed-bubble --overscroll-history-navigation=0 http://<dashboard-server-ip>:3000'
+Exec=sh -lc 'xset s off -dpms 2>/dev/null || true; chromium --kiosk --start-fullscreen --ozone-platform=wayland --noerrdialogs --disable-infobars --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch https://uxplay.sdc.nycu.club'
 X-GNOME-Autostart-enabled=true
 EOF
 ```
 
-把這段 URL 換成你的 dashboard server：
+手動測試：
 
-```text
-http://<dashboard-server-ip>:3000
+```bash
+chromium --kiosk --start-fullscreen --ozone-platform=wayland https://uxplay.sdc.nycu.club
 ```
-
-如果你用 Nginx / domain：
-
-```text
-http://dashboard.local
-https://dashboard.example.com
-```
-
-如果你的 Chromium 指令是 `chromium` 而不是 `chromium-browser`，把 autostart 裡的 `chromium-browser` 改成 `chromium`。
 
 重開機：
 
@@ -283,14 +314,14 @@ sudo reboot
 先在 Raspberry Pi 上確認 dashboard server 可以連：
 
 ```bash
-curl http://<dashboard-server-ip>:3000/api/unifi/health
-curl http://<dashboard-server-ip>:3000/api/wallpaper
+curl https://uxplay.sdc.nycu.club/api/unifi/health
+curl https://uxplay.sdc.nycu.club/api/wallpaper
 ```
 
 手動啟動 kiosk 測試：
 
 ```bash
-chromium-browser --kiosk http://<dashboard-server-ip>:3000
+chromium --kiosk --start-fullscreen --ozone-platform=wayland https://uxplay.sdc.nycu.club
 ```
 
 常見問題：
@@ -298,7 +329,7 @@ chromium-browser --kiosk http://<dashboard-server-ip>:3000
 - 黑畫面：先確認 Raspberry Pi 可以 `curl` dashboard URL。
 - 沒有自動開：確認 `~/.config/autostart/sdc-dashboard-kiosk.desktop` 是否存在。
 - 螢幕休眠：確認 `raspi-config` 的 screen blanking 已關閉，也確認 autostart 有 `xset s off -dpms`。
-- Chromium 顯示壞掉：Raspberry Pi OS Bookworm 可嘗試切回 X11。
+- Chromium 顯示壞掉：Raspberry Pi OS Bookworm 可嘗試切回 X11，或檢查 `/tmp/sdc-dashboard-kiosk.log`。
 
 ## 本機開發
 

@@ -226,9 +226,10 @@ app.get("/api/wallpaper", async (_request, response) => {
 });
 
 if (isProduction) {
+	const indexHtmlPath = path.join(distDir, "index.html");
 	app.use(express.static(distDir, { index: false }));
 	app.use((_request, response) => {
-		response.sendFile(path.join(distDir, "index.html"));
+		response.type("html").send(fs.readFileSync(indexHtmlPath, "utf8"));
 	});
 } else {
 	const { createServer } = await import("vite");

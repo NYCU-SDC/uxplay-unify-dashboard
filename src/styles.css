@@ -27,6 +27,7 @@ body {
 
 body {
 	margin: 0;
+	cursor: none;
 	font-family:
 		Inter,
 		ui-sans-serif,
