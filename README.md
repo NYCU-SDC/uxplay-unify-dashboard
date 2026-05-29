@@ -103,7 +103,7 @@ pnpm --version
 ```bash
 sudo mkdir -p /opt/unifi-ap-dashboard
 sudo chown "$USER":"$USER" /opt/unifi-ap-dashboard
-git clone https://github.com/elvisdragonmao/unify-ap-dashboard.git /opt/unifi-ap-dashboard
+git clone https://github.com/NYCU-SDC/uxplay-unify-dashboard.git /opt/unifi-ap-dashboard
 cd /opt/unifi-ap-dashboard
 ```
 
