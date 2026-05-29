@@ -1,19 +1,17 @@
-import { needsDeviceDetails, normalizeDashboard, rawEntityId, selectAccessPointDevices } from "@/lib/normalize";
-import { toSafeErrorMessage, UniFiClient, type RawRecord } from "@/lib/unifi";
-import { NextResponse } from "next/server";
+import "dotenv/config";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-export const runtime = "nodejs";
+import express from "express";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { extractApplicationVersion, needsDeviceDetails, normalizeDashboard, rawEntityId, selectAccessPointDevices } from "../lib/normalize";
+import { toSafeErrorMessage, UniFiClient, type RawRecord } from "../lib/unifi";
 
-function json(body: unknown, status = 200) {
-	return NextResponse.json(body, {
-		status,
-		headers: {
-			"Cache-Control": "no-store"
-		}
-	});
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(__dirname, "..");
+const distDir = path.join(rootDir, "dist");
+const isProduction = process.env.NODE_ENV === "production";
+const port = Number(process.env.PORT ?? 3000);
 
 function fulfilledValue<T>(result: PromiseSettledResult<T>) {
 	return result.status === "fulfilled" ? result.value : undefined;
@@ -44,7 +42,46 @@ async function settledMap<T>(items: RawRecord[], loader: (item: RawRecord) => Pr
 	return { map, warnings };
 }
 
-export async function GET() {
+const app = express();
+app.disable("x-powered-by");
+
+app.use((_request, response, next) => {
+	response.setHeader("Cache-Control", "no-store");
+	next();
+});
+
+app.get("/api/unifi/health", async (_request, response) => {
+	try {
+		const client = new UniFiClient();
+		const [infoResult, siteResult] = await Promise.allSettled([client.getApplicationInfo(), client.getSelectedSite()]);
+		const selectedSite = fulfilledValue(siteResult);
+		const applicationVersion = extractApplicationVersion(fulfilledValue(infoResult));
+
+		if (infoResult.status === "fulfilled" && selectedSite) {
+			response.json({
+				ok: true,
+				applicationVersion,
+				selectedSite
+			});
+			return;
+		}
+
+		const error = [rejectedWarning("Application info unavailable", infoResult), rejectedWarning("Site selection failed", siteResult)].filter(Boolean).join(" ");
+		response.status(503).json({
+			ok: false,
+			applicationVersion,
+			selectedSite,
+			error: error || "UniFi health check failed."
+		});
+	} catch (error) {
+		response.status(503).json({
+			ok: false,
+			error: toSafeErrorMessage(error)
+		});
+	}
+});
+
+app.get("/api/unifi/dashboard", async (_request, response) => {
 	const refreshedAt = new Date();
 
 	try {
@@ -54,12 +91,10 @@ export async function GET() {
 		const warnings = [rejectedWarning("Application info unavailable", infoResult)].filter((warning): warning is string => Boolean(warning));
 
 		if (!site) {
-			return json(
-				{
-					error: rejectedWarning("Site selection failed", siteResult) ?? "Unable to select a UniFi site."
-				},
-				503
-			);
+			response.status(503).json({
+				error: rejectedWarning("Site selection failed", siteResult) ?? "Unable to select a UniFi site."
+			});
+			return;
 		}
 
 		const [devicesResult, clientsResult, wifiBroadcastsResult, networksResult, legacyEventsResult] = await Promise.allSettled([
@@ -111,29 +146,50 @@ export async function GET() {
 			warnings.push(`Latest device statistics unavailable: ${toSafeErrorMessage(statsResult.reason)}`);
 		}
 
-		const dashboard = normalizeDashboard({
-			refreshedAt,
-			pollMs: client.config.pollMs,
-			controllerHostOnly: client.controllerHostOnly,
-			applicationInfo: fulfilledValue(infoResult),
-			site,
-			devices,
-			deviceDetailsById,
-			deviceStatsById,
-			clients,
-			wifiBroadcasts,
-			networks,
-			legacyEvents,
-			warnings
-		});
-
-		return json(dashboard);
-	} catch (error) {
-		return json(
-			{
-				error: toSafeErrorMessage(error)
-			},
-			503
+		response.json(
+			normalizeDashboard({
+				refreshedAt,
+				pollMs: client.config.pollMs,
+				controllerHostOnly: client.controllerHostOnly,
+				applicationInfo: fulfilledValue(infoResult),
+				site,
+				devices,
+				deviceDetailsById,
+				deviceStatsById,
+				clients,
+				wifiBroadcasts,
+				networks,
+				legacyEvents,
+				warnings
+			})
 		);
+	} catch (error) {
+		response.status(503).json({
+			error: toSafeErrorMessage(error)
+		});
 	}
+});
+
+if (isProduction) {
+	app.use(express.static(distDir, { index: false }));
+	app.use((_request, response) => {
+		response.sendFile(path.join(distDir, "index.html"));
+	});
+} else {
+	const { createServer } = await import("vite");
+	const vite = await createServer({
+		root: rootDir,
+		appType: "spa",
+		server: {
+			middlewareMode: true
+		}
+	});
+
+	app.use(vite.middlewares);
 }
+
+app.listen(port, "127.0.0.1", () => {
+	const mode = isProduction ? "production" : "development";
+	const staticStatus = isProduction ? (fs.existsSync(distDir) ? "serving dist" : "dist missing") : "vite middleware";
+	console.log(`UniFi dashboard ${mode} server listening on http://127.0.0.1:${port} (${staticStatus})`);
+});

@@ -1,4 +1,4 @@
-import { Agent } from "undici";
+import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from "undici";
 import type { SiteSummary } from "./types";
 
 export type RawRecord = Record<string, unknown>;
@@ -33,10 +33,6 @@ const MAX_PAGES = 20;
 
 const responseCache = new Map<string, { expiresAt: number; value: unknown }>();
 const insecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
-
-type FetchInitWithDispatcher = RequestInit & {
-	dispatcher?: Agent;
-};
 
 export class UniFiApiError extends Error {
 	status?: number;
@@ -184,6 +180,11 @@ export function toSafeErrorMessage(error: unknown) {
 	}
 
 	if (error instanceof Error) {
+		const cause = error.cause;
+		if (error.message === "fetch failed" && cause instanceof Error) {
+			return `fetch failed: ${cause.message}`;
+		}
+
 		return error.message;
 	}
 
@@ -232,7 +233,7 @@ export class UniFiClient {
 		const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
 
 		try {
-			const init: FetchInitWithDispatcher = {
+			const init: UndiciRequestInit = {
 				method: "GET",
 				headers: {
 					Accept: "application/json",
@@ -246,7 +247,7 @@ export class UniFiClient {
 				init.dispatcher = insecureDispatcher;
 			}
 
-			const response = await fetch(url, init);
+			const response = await undiciFetch(url, init);
 			const text = await response.text();
 
 			if (!response.ok) {

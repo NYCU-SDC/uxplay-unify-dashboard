@@ -2,7 +2,6 @@
 
 import { formatPercent } from "@/lib/format";
 import type { AccessPointSummary } from "@/lib/types";
-import { motion } from "framer-motion";
 import { Cpu, HardDrive, Radio, Wifi } from "lucide-react";
 import { MetricPill } from "./MetricPill";
 
@@ -10,7 +9,7 @@ export function ApNode({ ap }: { ap?: AccessPointSummary }) {
 	const online = !["offline", "disconnected", "down", "failed"].includes((ap?.status ?? ap?.state ?? "").toLowerCase());
 
 	return (
-		<motion.div className="flex flex-col items-center text-center" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+		<div className="flex flex-col items-center text-center">
 			<div className="relative grid h-24 w-24 place-items-center rounded-full border border-slate-200 bg-white shadow-node">
 				<div className={`absolute inset-[-10px] rounded-full ${online ? "bg-blue-500/10" : "bg-slate-400/10"} blur-xl`} />
 				<div className="relative grid h-16 w-16 place-items-center rounded-full border border-slate-100 bg-slate-50">
@@ -27,6 +26,6 @@ export function ApNode({ ap }: { ap?: AccessPointSummary }) {
 				<MetricPill tone="blue" icon={<Cpu className="h-3.5 w-3.5" />} label="CPU" value={formatPercent(ap?.cpuPct)} />
 				<MetricPill tone="purple" icon={<HardDrive className="h-3.5 w-3.5" />} label="Memory" value={formatPercent(ap?.memoryPct)} />
 			</div>
-		</motion.div>
+		</div>
 	);
 }

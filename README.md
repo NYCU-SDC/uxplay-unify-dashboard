@@ -1,6 +1,6 @@
-# UniFi Office Dashboard
+# SDC UniFi Office Dashboard
 
-A local Next.js dashboard for an office monitor in Chromium kiosk mode. The browser only polls this app's backend route; UniFi API calls and the API key stay on the server.
+A local React dashboard for an office monitor in Chromium kiosk mode. A small Node/Express server serves the page and owns all UniFi API calls, so the browser never receives the UniFi API key.
 
 ## Environment
 
@@ -10,7 +10,7 @@ Create a UniFi API key in:
 UniFi Network -> Settings / Control Plane -> Integrations -> Create API Key
 ```
 
-Example `.env.local`:
+Example `.env`:
 
 ```bash
 UNIFI_BASE_URL=https://ui.sdc.nycu.club
@@ -70,6 +70,13 @@ Dashboard endpoint:
 http://localhost:3000/api/unifi/dashboard
 ```
 
+Production build:
+
+```bash
+npm run build
+npm run start
+```
+
 ## Kiosk
 
 ```bash
@@ -78,7 +85,7 @@ chromium --kiosk http://localhost:3000
 
 ## Security
 
-Do not expose `UNIFI_API_KEY` to the browser. Keep all UniFi API calls in Next.js route handlers under `app/api/unifi/*`. The frontend polls `/api/unifi/dashboard` every 5 seconds and receives normalized data only.
+Do not expose `UNIFI_API_KEY` to the browser. Keep all UniFi API calls in `server/index.ts` and `lib/unifi.ts`. The frontend polls `/api/unifi/dashboard` every 5 seconds and receives normalized data only.
 
 ## Troubleshooting
 
