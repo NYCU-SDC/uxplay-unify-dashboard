@@ -911,8 +911,12 @@ export function normalizeDashboard(input: NormalizeDashboardInput): DashboardDat
 
 	const onlineClients = clients.filter(client => client.isOnline).length;
 	const accessPointsOnline = aps.filter(ap => !["offline", "disconnected", "down", "failed"].includes((ap.status ?? ap.state ?? "").toLowerCase())).length;
-	const totalDownloadBps = clients.length > 0 ? clients.reduce((sum, client) => sum + client.downloadBps, 0) : aps.reduce((sum, ap) => sum + (ap.downloadBps ?? 0), 0);
-	const totalUploadBps = clients.length > 0 ? clients.reduce((sum, client) => sum + client.uploadBps, 0) : aps.reduce((sum, ap) => sum + (ap.uploadBps ?? 0), 0);
+	const clientDownloadBps = clients.reduce((sum, client) => sum + client.downloadBps, 0);
+	const clientUploadBps = clients.reduce((sum, client) => sum + client.uploadBps, 0);
+	const apDownloadBps = aps.reduce((sum, ap) => sum + (ap.downloadBps ?? 0), 0);
+	const apUploadBps = aps.reduce((sum, ap) => sum + (ap.uploadBps ?? 0), 0);
+	const totalDownloadBps = clientDownloadBps > 0 ? clientDownloadBps : apDownloadBps;
+	const totalUploadBps = clientUploadBps > 0 ? clientUploadBps : apUploadBps;
 	const usageValues = clients.map(client => client.usage24hBytes).filter((value): value is number => value !== undefined);
 	const health = healthFrom(aps, clients);
 	const events = (input.legacyEvents ?? [])

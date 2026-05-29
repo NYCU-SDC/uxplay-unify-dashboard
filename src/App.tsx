@@ -296,7 +296,7 @@ export function App() {
 
 	const lastRefresh = useMemo(() => ageLabel(data?.refreshedAt, now), [data?.refreshedAt, now]);
 	const primaryAp = data?.aps[0];
-	const clients = data?.clients.slice(0, 8) ?? [];
+	const clients = data?.clients.slice(0, 5) ?? [];
 
 	return (
 		<main className="relative min-h-screen overflow-hidden bg-slate-950 text-white">
@@ -325,32 +325,31 @@ export function App() {
 				</span>
 			</div>
 
-			<div className="relative z-10 grid min-h-screen grid-rows-[1fr_auto] px-8 pb-7 pt-20">
-				<div className="grid grid-cols-[minmax(0,1fr)_25rem] items-center gap-8">
+			<div className="relative z-10 grid min-h-screen grid-rows-[1fr_auto] px-7 pb-5 pt-14">
+				<div className="grid grid-cols-[minmax(0,1fr)_21rem] items-center gap-6">
 					<section className="max-w-3xl">
-						<div className="inline-flex rounded-full border border-white/18 bg-white/14 px-3 py-1 text-xs font-medium uppercase text-white/75 backdrop-blur-xl">Office Screen</div>
-						<h1 className="mt-6 max-w-2xl text-6xl font-semibold leading-[0.98] text-white drop-shadow-[0_8px_28px_rgba(0,0,0,0.28)]">SDC Dashboard</h1>
+						<h1 className="max-w-2xl text-5xl font-semibold leading-[0.98] text-white drop-shadow-[0_8px_28px_rgba(0,0,0,0.28)]">SDC Dashboard</h1>
 
-						<div className="mt-10 grid max-w-2xl grid-cols-2 gap-4">
-							<div className="rounded-lg border border-white/16 bg-white/18 p-5 shadow-soft backdrop-blur-2xl">
+						<div className="mt-8 grid max-w-2xl grid-cols-2 gap-3">
+							<div className="rounded-lg border border-white/16 bg-white/18 p-4 shadow-soft backdrop-blur-2xl">
 								<div className="flex items-center gap-2 text-sm font-medium text-white/72">
 									<Wifi className="h-4 w-4 text-blue-200" aria-hidden="true" />
 									Wi-Fi Username/Password
 								</div>
-								<div className="mt-3 text-4xl font-semibold text-white">BambooFox</div>
+								<div className="mt-3 text-3xl font-semibold text-white">BambooFox</div>
 							</div>
 
-							<div className="rounded-lg border border-white/16 bg-white/18 p-5 shadow-soft backdrop-blur-2xl">
+							<div className="rounded-lg border border-white/16 bg-white/18 p-4 shadow-soft backdrop-blur-2xl">
 								<div className="flex items-center gap-2 text-sm font-medium text-white/72">
 									<Airplay className="h-4 w-4 text-violet-200" aria-hidden="true" />
 									AirPlay 螢幕投影 (要連 Wi-Fi)
 								</div>
-								<div className="mt-3 text-4xl font-semibold text-white">UxPlay@SDC</div>
+								<div className="mt-3 text-3xl font-semibold text-white">UxPlay@SDC</div>
 							</div>
 						</div>
 					</section>
 
-					<aside className="rounded-lg border border-white/18 bg-slate-950/38 p-5 text-white shadow-soft backdrop-blur-2xl">
+					<aside className="rounded-lg border border-white/18 bg-slate-950/38 p-4 text-white shadow-soft backdrop-blur-2xl">
 						<div className="flex items-start justify-between gap-4">
 							<div>
 								<div className="text-xs font-semibold uppercase text-white/55">Network Status</div>
@@ -367,7 +366,7 @@ export function App() {
 						<div className="mt-5 grid grid-cols-2 gap-2">
 							<MetricPill tone="blue" icon={<ArrowDown className="h-3.5 w-3.5" />} label="Down" value={formatBps(data?.summary.totalDownloadBps)} />
 							<MetricPill tone="purple" icon={<ArrowUp className="h-3.5 w-3.5" />} label="Up" value={formatBps(data?.summary.totalUploadBps)} />
-							<MetricPill tone="green" icon={<Users className="h-3.5 w-3.5" />} label="Clients" value={String(data?.summary.onlineClients ?? 0)} />
+							<MetricPill tone="green" icon={<Users className="h-3.5 w-3.5" />} value={String(data?.summary.onlineClients ?? 0)} />
 							<MetricPill tone="gray" icon={<ShieldCheck className="h-3.5 w-3.5" />} label="Health" value={data?.summary.healthLabel ?? "Unknown"} />
 						</div>
 
@@ -380,7 +379,7 @@ export function App() {
 					</aside>
 				</div>
 
-				<div className="mt-7">
+				<div className="mt-5">
 					<ClientFlow clients={clients} />
 				</div>
 			</div>

@@ -264,7 +264,7 @@ sudo raspi-config
 - `System Options -> Boot / Auto Login -> Desktop Autologin`
 - `Display Options -> Screen Blanking -> No`
 
-建立 labwc autostart：
+建立 labwc autostart。這裡刻意使用 `--app` 而不是 `--kiosk`，避免 Chromium 一直壓在 UxPlay 投影畫面上方：
 
 ```bash
 mkdir -p ~/.config/labwc
@@ -272,17 +272,43 @@ tee ~/.config/labwc/autostart >/dev/null <<'EOF'
 #!/bin/sh
 xset s off -dpms 2>/dev/null || true
 chromium \
-  --kiosk \
+  --app=https://uxplay.sdc.nycu.club \
   --start-fullscreen \
   --ozone-platform=wayland \
   --force-device-scale-factor=0.85 \
+  --no-first-run \
   --noerrdialogs \
   --disable-infobars \
   --disable-session-crashed-bubble \
   --overscroll-history-navigation=0 \
-  --disable-pinch \
-  https://uxplay.sdc.nycu.club >/tmp/sdc-dashboard-kiosk.log 2>&1 &
+  --disable-pinch >/tmp/sdc-dashboard-kiosk.log 2>&1 &
 EOF
+```
+
+讓 Chromium dashboard 永遠在一般視窗底層，AirPlay 投影視窗出現時可以蓋到上面：
+
+```bash
+tee ~/.config/labwc/rc.xml >/dev/null <<'EOF'
+<?xml version="1.0"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <theme>
+    <font place="ActiveWindow"><name>Nunito Sans</name><size>12</size><weight>Light</weight><slant>Normal</slant></font>
+    <font place="InactiveWindow"><name>Nunito Sans</name><size>12</size><weight>Light</weight><slant>Normal</slant></font>
+    <name>PiXtrix</name>
+  </theme>
+  <windowRules>
+    <windowRule identifier="chromium*" matchOnce="false">
+      <action name="ToggleAlwaysOnBottom" />
+    </windowRule>
+  </windowRules>
+</openbox_config>
+EOF
+```
+
+目前 SDC 的 UxPlay user service 使用這個 command，投影視窗由 `waylandsink` 開 fullscreen：
+
+```ini
+ExecStart=/usr/bin/uxplay -p -fs -vs waylandsink -vsync no -as 0 -s 1024x768@60
 ```
 
 同時建立 XDG autostart，讓 X11/LXDE 環境也能啟動：
@@ -293,7 +319,7 @@ tee ~/.config/autostart/sdc-dashboard-kiosk.desktop >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=SDC Dashboard Kiosk
-Exec=sh -lc 'xset s off -dpms 2>/dev/null || true; chromium --kiosk --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 --noerrdialogs --disable-infobars --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch https://uxplay.sdc.nycu.club'
+Exec=sh -lc 'xset s off -dpms 2>/dev/null || true; chromium --app=https://uxplay.sdc.nycu.club --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 --no-first-run --noerrdialogs --disable-infobars --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch >/tmp/sdc-dashboard-kiosk.log 2>&1'
 X-GNOME-Autostart-enabled=true
 EOF
 ```
@@ -301,7 +327,7 @@ EOF
 手動測試：
 
 ```bash
-chromium --kiosk --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 https://uxplay.sdc.nycu.club
+chromium --app=https://uxplay.sdc.nycu.club --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85
 ```
 
 重開機：
@@ -322,7 +348,7 @@ curl https://uxplay.sdc.nycu.club/api/wallpaper
 手動啟動 kiosk 測試：
 
 ```bash
-chromium --kiosk --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 https://uxplay.sdc.nycu.club
+chromium --app=https://uxplay.sdc.nycu.club --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85
 ```
 
 常見問題：
