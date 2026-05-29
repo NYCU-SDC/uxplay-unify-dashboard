@@ -5,6 +5,7 @@
 		"build": "vite build",
 		"dev": "tsx server/index.ts",
 		"format": "prettier --write .",
+		"format:check": "prettier --check .",
 		"prepare": "sh -c 'if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git config core.hooksPath .githooks; fi'",
 		"start": "NODE_ENV=production tsx server/index.ts",
 		"test": "tsc --noEmit",

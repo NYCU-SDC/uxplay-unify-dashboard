@@ -56,8 +56,12 @@ export function ClientFlow({ clients }: { clients: ClientSummary[] }) {
 									<div className="flex min-w-0 flex-col items-end gap-1.5">
 										<span className="inline-flex rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-blue-700">#{index + 1}</span>
 										<div className="flex max-w-full flex-wrap justify-end gap-1">
-											{client.wifiGeneration ? <span className="rounded-full border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{client.wifiGeneration}</span> : null}
-											{client.ssid ? <span className="max-w-24 truncate rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{client.ssid}</span> : null}
+											{client.wifiGeneration ? (
+												<span className="rounded-full border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{client.wifiGeneration}</span>
+											) : null}
+											{client.ssid ? (
+												<span className="max-w-24 truncate rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">{client.ssid}</span>
+											) : null}
 										</div>
 									</div>
 								</div>
