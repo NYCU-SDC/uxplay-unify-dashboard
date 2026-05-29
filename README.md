@@ -46,7 +46,8 @@ PORT=3000
 UNIFI_SITE_ID=
 UNIFI_SITE_INTERNAL_REF=default
 UNIFI_INSECURE_TLS=true
-ENABLE_UNIFI_LEGACY=false
+# 要顯示每台 client 的即時上傳/下載速度，需要啟用 read-only legacy stat/sta fallback。
+ENABLE_UNIFI_LEGACY=true
 DASHBOARD_POLL_MS=5000
 ```
 

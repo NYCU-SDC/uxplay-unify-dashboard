@@ -59,6 +59,10 @@ export interface ClientSummary {
 	downloadBps: number;
 	uploadBps: number;
 	activityBps: number;
+	txRateBps?: number;
+	rxRateBps?: number;
+	txBytes?: number;
+	rxBytes?: number;
 	usage24hBytes?: number;
 	connectedSeconds?: number;
 	lastSeen?: string;

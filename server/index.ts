@@ -4,7 +4,7 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { extractApplicationVersion, getFirst, integrationDeviceId, isRecord, needsDeviceDetails, normalizeDashboard, selectAccessPointDevices, stableDeviceKey } from "../lib/normalize";
+import { extractApplicationVersion, getFirst, integrationDeviceId, isRecord, maskMac, needsDeviceDetails, normalizeDashboard, selectAccessPointDevices, stableDeviceKey } from "../lib/normalize";
 import { toSafeErrorMessage, UniFiClient, type RawRecord } from "../lib/unifi";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -70,6 +70,29 @@ function debugStatsUplink(stats: RawRecord | undefined) {
 	return isRecord(uplink) ? uplink : undefined;
 }
 
+function debugLegacyClient(raw: RawRecord | undefined) {
+	if (!raw) {
+		return undefined;
+	}
+
+	return {
+		id: getFirst(raw, ["_id", "id", "user_id"]),
+		name: getFirst(raw, ["name", "hostname"]),
+		macAddress: getFirst(raw, ["mac", "macAddress"]),
+		topLevelKeys: Object.keys(raw).sort(),
+		rateFields: {
+			txRate: raw.tx_rate,
+			rxRate: raw.rx_rate,
+			txRateBps: raw.txRateBps ?? raw.tx_rate_bps,
+			rxRateBps: raw.rxRateBps ?? raw.rx_rate_bps,
+			txBytesRate: raw["tx_bytes-r"] ?? raw.tx_bytes_r,
+			rxBytesRate: raw["rx_bytes-r"] ?? raw.rx_bytes_r,
+			txBytes: raw.tx_bytes ?? raw.txBytes,
+			rxBytes: raw.rx_bytes ?? raw.rxBytes
+		}
+	};
+}
+
 const app = express();
 app.disable("x-powered-by");
 
@@ -125,12 +148,13 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 			return;
 		}
 
-		const [devicesResult, clientsResult, wifiBroadcastsResult, networksResult, legacyEventsResult] = await Promise.allSettled([
+		const [devicesResult, clientsResult, wifiBroadcastsResult, networksResult, legacyEventsResult, legacyClientsResult] = await Promise.allSettled([
 			client.getDevices(site.id),
 			client.getClients(site.id),
 			client.getWifiBroadcasts(site.id),
 			client.getNetworks(site.id),
-			client.getLegacyEvents(site.internalReference)
+			client.getLegacyEvents(site.internalReference),
+			client.getLegacyClients(site.internalReference)
 		]);
 
 		for (const warning of [
@@ -138,7 +162,8 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 			rejectedWarning("Clients unavailable", clientsResult),
 			rejectedWarning("WiFi broadcasts unavailable", wifiBroadcastsResult),
 			rejectedWarning("Networks unavailable", networksResult),
-			rejectedWarning("Legacy enrichment unavailable", legacyEventsResult)
+			rejectedWarning("Legacy enrichment unavailable", legacyEventsResult),
+			rejectedWarning("Legacy clients unavailable", legacyClientsResult)
 		]) {
 			if (warning) {
 				warnings.push(warning);
@@ -150,6 +175,7 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 		const wifiBroadcasts = fulfilledValue(wifiBroadcastsResult) ?? [];
 		const networks = fulfilledValue(networksResult) ?? [];
 		const legacyEvents = fulfilledValue(legacyEventsResult) ?? [];
+		const legacyClients = fulfilledValue(legacyClientsResult) ?? [];
 		const apTargets = selectAccessPointDevices(devices);
 		const visibleApTargets = apTargets.length > 0 ? apTargets : devices.slice(0, 3);
 		const detailTargets = visibleApTargets.filter(device => integrationDeviceId(device) && needsDeviceDetails(device));
@@ -184,6 +210,7 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 			deviceDetailsById,
 			deviceStatsById,
 			clients,
+			legacyClients,
 			wifiBroadcasts,
 			networks,
 			legacyEvents,
@@ -194,6 +221,9 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 			const firstAp = visibleApTargets[0];
 			const firstApKey = firstAp ? stableDeviceKey(firstAp) : undefined;
 			const firstApStats = firstApKey ? deviceStatsById.get(firstApKey) : undefined;
+			const firstLegacyClient = legacyClients[0];
+			const firstLegacyClientMac = firstLegacyClient ? getFirst(firstLegacyClient, ["mac", "macAddress"]) : undefined;
+			const matchedLegacyClient = typeof firstLegacyClientMac === "string" ? dashboard.clients.find(clientSummary => clientSummary.macMasked === maskMac(firstLegacyClientMac)) : undefined;
 			response.json({
 				...dashboard,
 				_debug: {
@@ -203,7 +233,20 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 					normalizedThroughput: {
 						uploadBps: dashboard.aps[0]?.uploadBps ?? 0,
 						downloadBps: dashboard.aps[0]?.downloadBps ?? 0
-					}
+					},
+					firstLegacyClient: debugLegacyClient(firstLegacyClient),
+					normalizedLegacyClientThroughput: matchedLegacyClient
+						? {
+								id: matchedLegacyClient.id,
+								name: matchedLegacyClient.name,
+								uploadBps: matchedLegacyClient.uploadBps,
+								downloadBps: matchedLegacyClient.downloadBps,
+								txRateBps: matchedLegacyClient.txRateBps,
+								rxRateBps: matchedLegacyClient.rxRateBps,
+								txBytes: matchedLegacyClient.txBytes,
+								rxBytes: matchedLegacyClient.rxBytes
+							}
+						: undefined
 				}
 			});
 			return;

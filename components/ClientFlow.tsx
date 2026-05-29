@@ -34,7 +34,7 @@ function experienceClass(label: ClientSummary["experienceLabel"]) {
 }
 
 function compactRate(value: number) {
-	return value > 0 ? formatBps(value) : "—";
+	return formatBps(value);
 }
 
 export function ClientFlow({ clients }: { clients: ClientSummary[] }) {

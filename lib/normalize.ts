@@ -11,6 +11,7 @@ interface NormalizeDashboardInput {
 	deviceDetailsById?: Map<string, RawRecord>;
 	deviceStatsById?: Map<string, RawRecord>;
 	clients: RawRecord[];
+	legacyClients?: RawRecord[];
 	wifiBroadcasts: RawRecord[];
 	networks: RawRecord[];
 	legacyEvents?: RawRecord[];
@@ -160,6 +161,11 @@ export function rawEntityId(raw: RawRecord) {
 
 function normalizeMac(mac?: string) {
 	return mac?.trim().toLowerCase().replaceAll("-", ":");
+}
+
+function rawClientMac(raw: RawRecord) {
+	const record = unwrapDataRecord(raw);
+	return normalizeMac(asString(getFirst(record, ["mac", "macAddress", "clientMac", "client_mac"])));
 }
 
 export function maskMac(mac?: string) {
@@ -327,6 +333,77 @@ function readBytes(objects: unknown[], direction: "download" | "upload") {
 		["bytes-t"],
 		["uploadBytes"]
 	];
+
+	return positiveNumber(firstNestedAcross(objects, direction === "download" ? downloadPaths : uploadPaths));
+}
+
+function readClientExplicitRateBps(objects: unknown[], direction: "download" | "upload") {
+	const downloadPaths = [
+		["statistics", "rxRateBps"],
+		["traffic", "rxRateBps"],
+		["rate", "rxRateBps"],
+		["rate", "downloadBps"],
+		["rxRateBps"],
+		["rx_rate_bps"],
+		["rxBps"],
+		["rx_bps"],
+		["downloadBps"],
+		["downloadRateBps"],
+		["downlinkRateBps"]
+	];
+	const uploadPaths = [
+		["statistics", "txRateBps"],
+		["traffic", "txRateBps"],
+		["rate", "txRateBps"],
+		["rate", "uploadBps"],
+		["txRateBps"],
+		["tx_rate_bps"],
+		["txBps"],
+		["tx_bps"],
+		["uploadBps"],
+		["uploadRateBps"],
+		["uplinkRateBps"]
+	];
+
+	return positiveNumber(firstNestedAcross(objects, direction === "download" ? downloadPaths : uploadPaths));
+}
+
+function readClientByteRateBps(objects: unknown[], direction: "download" | "upload") {
+	const downloadPaths = [
+		["statistics", "rxBytesPerSecond"],
+		["traffic", "rxBytesPerSecond"],
+		["rxBytesPerSecond"],
+		["rxBytesPerSec"],
+		["rxBytesRate"],
+		["rx_bytes-r"],
+		["rx_bytes_r"],
+		["rx_bytes_per_second"],
+		["rx_bytes_per_sec"],
+		["downloadBytesPerSecond"],
+		["downloadBytesPerSec"],
+		["downloadBytesRate"]
+	];
+	const uploadPaths = [
+		["statistics", "txBytesPerSecond"],
+		["traffic", "txBytesPerSecond"],
+		["txBytesPerSecond"],
+		["txBytesPerSec"],
+		["txBytesRate"],
+		["tx_bytes-r"],
+		["tx_bytes_r"],
+		["tx_bytes_per_second"],
+		["tx_bytes_per_sec"],
+		["uploadBytesPerSecond"],
+		["uploadBytesPerSec"],
+		["uploadBytesRate"]
+	];
+	const bytesPerSecond = positiveNumber(firstNestedAcross(objects, direction === "download" ? downloadPaths : uploadPaths));
+	return bytesPerSecond === undefined ? undefined : bytesPerSecond * 8;
+}
+
+function readClientTotalBytes(objects: unknown[], direction: "download" | "upload") {
+	const downloadPaths = [["statistics", "rxBytes"], ["traffic", "rxBytes"], ["traffic", "downloadBytes"], ["rxBytes"], ["rx_bytes"], ["downloadBytes"]];
+	const uploadPaths = [["statistics", "txBytes"], ["traffic", "txBytes"], ["traffic", "uploadBytes"], ["txBytes"], ["tx_bytes"], ["uploadBytes"]];
 
 	return positiveNumber(firstNestedAcross(objects, direction === "download" ? downloadPaths : uploadPaths));
 }
@@ -668,16 +745,19 @@ function normalizeDeviceIcon(raw: RawRecord): DeviceIcon {
 	return "unknown";
 }
 
-function normalizeClient(raw: RawRecord, now: Date, apById: Map<string, AccessPointSummary>, apIdByMac: Map<string, string>): ClientSummary {
-	raw = unwrapDataRecord(raw);
-	const id = rawEntityId(raw);
-	const mac = normalizeMac(asString(getFirst(raw, ["mac", "macAddress", "clientMac"])));
-	const hostname = asString(getFirst(raw, ["hostname", "hostName", "clientName"]));
-	const displayName = asString(getFirst(raw, ["name", "displayName", "alias", "clientName", "hostname", "hostName"])) ?? maskMac(mac);
+function normalizeClient(raw: RawRecord, legacyRaw: RawRecord | undefined, now: Date, apById: Map<string, AccessPointSummary>, apIdByMac: Map<string, string>): ClientSummary {
+	const integrationRaw = unwrapDataRecord(raw);
+	const legacy = legacyRaw ? unwrapDataRecord(legacyRaw) : undefined;
+	const merged = legacy ? { ...legacy, ...integrationRaw } : integrationRaw;
+	const sources = expandSources([legacy, integrationRaw]);
+	const id = rawEntityId(merged);
+	const mac = rawClientMac(merged);
+	const hostname = asString(getFirst(merged, ["hostname", "hostName", "clientName"]));
+	const displayName = asString(getFirst(merged, ["name", "displayName", "alias", "clientName", "hostname", "hostName"])) ?? maskMac(mac);
 	const rawApId =
 		asString(
-			getFirst(raw, ["apId", "accessPointId", "uplinkDeviceId", "deviceId", "connectedDeviceId", "uplinkApId", "apMac"]) ??
-				getNestedFirst(raw, [
+			getFirst(merged, ["apId", "accessPointId", "uplinkDeviceId", "deviceId", "connectedDeviceId", "uplinkApId", "apMac", "ap_mac", "lastUplinkMac", "last_uplink_mac"]) ??
+				getNestedFirst(merged, [
 					["accessPoint", "id"],
 					["ap", "id"],
 					["uplink", "deviceId"],
@@ -689,8 +769,8 @@ function normalizeClient(raw: RawRecord, now: Date, apById: Map<string, AccessPo
 	const apId = rawApId && apById.has(rawApId) ? rawApId : rawApId ? (apIdByMac.get(normalizeMac(rawApId) ?? "") ?? rawApId) : undefined;
 	const band = normalizeBand(
 		asString(
-			getFirst(raw, ["band", "radioBand", "frequencyBand", "radio", "radioName"]) ??
-				getNestedFirst(raw, [
+			getFirst(merged, ["band", "radioBand", "frequencyBand", "radio", "radioName", "radio_name", "last_radio"]) ??
+				getNestedFirst(merged, [
 					["wifi", "band"],
 					["radio", "band"],
 					["connection", "band"]
@@ -698,36 +778,38 @@ function normalizeClient(raw: RawRecord, now: Date, apById: Map<string, AccessPo
 		)
 	);
 	const technology = asString(
-		getFirst(raw, ["technology", "phyMode", "wifiStandard", "radio_proto", "protocol"]) ??
-			getNestedFirst(raw, [
+		getFirst(merged, ["technology", "phyMode", "wifiStandard", "radio_proto", "protocol"]) ??
+			getNestedFirst(merged, [
 				["connection", "technology"],
 				["wifi", "standard"]
 			])
 	);
-	const wifiGeneration = normalizeWifiGeneration(asString(getFirst(raw, ["wifiGeneration", "wifiGen", "generation"])) ?? undefined, band) ?? normalizeWifiGeneration(technology, band);
+	const wifiGeneration = normalizeWifiGeneration(asString(getFirst(merged, ["wifiGeneration", "wifiGen", "generation"])) ?? undefined, band) ?? normalizeWifiGeneration(technology, band);
 	const rssi = asNumber(
-		getFirst(raw, ["rssiDbm", "rssi", "signalDbm"]) ??
-			getNestedFirst(raw, [
+		getFirst(merged, ["rssiDbm", "rssi", "signalDbm", "signal"]) ??
+			getNestedFirst(merged, [
 				["signal", "rssi"],
 				["wifi", "rssi"]
 			])
 	);
-	const explicitSignalPct = percentFrom(getFirst(raw, ["signalPct", "signalPercent", "signalStrengthPct"]) ?? getNestedFirst(raw, [["signal", "percent"]]));
+	const explicitSignalPct = percentFrom(getFirst(merged, ["signalPct", "signalPercent", "signalStrengthPct"]) ?? getNestedFirst(merged, [["signal", "percent"]]));
 	const experienceScore = percentFrom(
-		getFirst(raw, ["experienceScore", "wifiExperience", "experience", "satisfaction", "score"]) ??
-			getNestedFirst(raw, [
+		getFirst(merged, ["experienceScore", "wifiExperience", "experience", "satisfaction", "satisfaction_now", "satisfaction_avg", "satisfaction_real", "score"]) ??
+			getNestedFirst(merged, [
 				["experience", "score"],
 				["wifi", "experienceScore"]
 			])
 	);
-	const downloadBytes = readBytes([raw], "download");
-	const uploadBytes = readBytes([raw], "upload");
-	const derived = deriveRates(`client:${id}`, now, downloadBytes, uploadBytes);
-	const downloadBps = readRate([raw], "download") ?? derived.downloadBps ?? 0;
-	const uploadBps = readRate([raw], "upload") ?? derived.uploadBps ?? 0;
+	const downloadBytes = readClientTotalBytes(sources, "download");
+	const uploadBytes = readClientTotalBytes(sources, "upload");
+	const derived = deriveRates(`client:${mac ?? id}`, now, downloadBytes, uploadBytes);
+	const txRateBps = readClientExplicitRateBps(sources, "upload");
+	const rxRateBps = readClientExplicitRateBps(sources, "download");
+	const downloadBps = rxRateBps ?? readClientByteRateBps(sources, "download") ?? derived.downloadBps ?? 0;
+	const uploadBps = txRateBps ?? readClientByteRateBps(sources, "upload") ?? derived.uploadBps ?? 0;
 	const total24h = positiveNumber(
-		getFirst(raw, ["usage24hBytes", "dailyUsageBytes", "last24hBytes"]) ??
-			getNestedFirst(raw, [
+		getFirst(merged, ["usage24hBytes", "dailyUsageBytes", "last24hBytes"]) ??
+			getNestedFirst(merged, [
 				["usage", "last24hBytes"],
 				["traffic", "usage24hBytes"]
 			])
@@ -738,8 +820,8 @@ function normalizeClient(raw: RawRecord, now: Date, apById: Map<string, AccessPo
 		name: displayName,
 		hostname,
 		ip: asString(
-			getFirst(raw, ["ip", "ipAddress", "displayIp"]) ??
-				getNestedFirst(raw, [
+			getFirst(merged, ["ip", "ipAddress", "displayIp", "last_ip"]) ??
+				getNestedFirst(merged, [
 					["network", "ip"],
 					["connection", "ip"]
 				])
@@ -748,16 +830,16 @@ function normalizeClient(raw: RawRecord, now: Date, apById: Map<string, AccessPo
 		apId,
 		apName: apId ? apById.get(apId)?.name : undefined,
 		ssid: asString(
-			getFirst(raw, ["ssid", "essid", "wifiName", "wlanName"]) ??
-				getNestedFirst(raw, [
+			getFirst(merged, ["ssid", "essid", "wifiName", "wlanName"]) ??
+				getNestedFirst(merged, [
 					["wifi", "name"],
 					["wlan", "name"],
 					["network", "ssid"]
 				])
 		),
 		network: asString(
-			getFirst(raw, ["network", "networkName", "vlanName"]) ??
-				getNestedFirst(raw, [
+			getFirst(merged, ["network", "networkName", "vlanName"]) ??
+				getNestedFirst(merged, [
 					["network", "name"],
 					["vlan", "name"]
 				])
@@ -768,30 +850,34 @@ function normalizeClient(raw: RawRecord, now: Date, apById: Map<string, AccessPo
 		technology,
 		band,
 		channel: asString(
-			getFirst(raw, ["channel", "channelNumber"]) ??
-				getNestedFirst(raw, [
+			getFirst(merged, ["channel", "channelNumber"]) ??
+				getNestedFirst(merged, [
 					["wifi", "channel"],
 					["connection", "channel"]
 				])
 		),
 		channelWidthMHz: asNumber(
-			getFirst(raw, ["channelWidthMHz", "channelWidth", "width"]) ??
-				getNestedFirst(raw, [
+			getFirst(merged, ["channelWidthMHz", "channelWidth", "channel_width", "width"]) ??
+				getNestedFirst(merged, [
 					["wifi", "channelWidth"],
 					["connection", "channelWidth"]
 				])
 		),
-		mimo: asString(getFirst(raw, ["mimo", "spatialStreams", "spatialStream"]) ?? getNestedFirst(raw, [["wifi", "mimo"]])),
+		mimo: asString(getFirst(merged, ["mimo", "spatialStreams", "spatialStream", "nss"]) ?? getNestedFirst(merged, [["wifi", "mimo"]])),
 		rssiDbm: rssi,
 		signalPct: explicitSignalPct ?? signalPctFromRssi(rssi),
 		downloadBps,
 		uploadBps,
 		activityBps: downloadBps + uploadBps,
+		txRateBps,
+		rxRateBps,
+		txBytes: uploadBytes,
+		rxBytes: downloadBytes,
 		usage24hBytes: total24h,
-		connectedSeconds: positiveNumber(getFirst(raw, ["connectedSeconds", "uptime", "uptimeSec", "associationTime"]) ?? getNestedFirst(raw, [["connection", "uptime"]])),
-		lastSeen: normalizeTime(getFirst(raw, ["lastSeen", "lastSeenAt", "last_seen", "seenAt"]) ?? getNestedFirst(raw, [["lastSeen", "time"]])),
-		isOnline: isOnline(raw),
-		deviceIcon: normalizeDeviceIcon(raw)
+		connectedSeconds: positiveNumber(getFirst(merged, ["connectedSeconds", "uptime", "uptimeSec", "associationTime"]) ?? getNestedFirst(merged, [["connection", "uptime"]])),
+		lastSeen: normalizeTime(getFirst(merged, ["lastSeen", "lastSeenAt", "last_seen", "seenAt"]) ?? getNestedFirst(merged, [["lastSeen", "time"]])),
+		isOnline: isOnline(merged),
+		deviceIcon: normalizeDeviceIcon(merged)
 	};
 }
 
@@ -920,7 +1006,15 @@ export function normalizeDashboard(input: NormalizeDashboardInput): DashboardDat
 		}
 	}
 
-	const clients = input.clients.map(client => normalizeClient(client, now, apById, apIdByMac)).sort((a, b) => b.activityBps - a.activityBps);
+	const legacyClientsByMac = new Map<string, RawRecord>();
+	for (const legacyClient of input.legacyClients ?? []) {
+		const mac = rawClientMac(legacyClient);
+		if (mac) {
+			legacyClientsByMac.set(mac, legacyClient);
+		}
+	}
+
+	const clients = input.clients.map(client => normalizeClient(client, legacyClientsByMac.get(rawClientMac(client) ?? ""), now, apById, apIdByMac)).sort((a, b) => b.activityBps - a.activityBps);
 	const aps = apRawDevices.map(raw => {
 		const rawKey = stableDeviceKey(raw);
 		const merged = mergeDevice(raw, input.deviceDetailsById?.get(rawKey));

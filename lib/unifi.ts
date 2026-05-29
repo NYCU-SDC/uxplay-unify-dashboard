@@ -369,6 +369,16 @@ export class UniFiClient {
 		const json = await this.requestJson<unknown>(`/proxy/network/api/s/${encodedSite}/stat/event?limit=20`, { cacheTtlMs: 15_000 });
 		return collectionFromResponse<RawRecord>(json).items;
 	}
+
+	async getLegacyClients(siteInternalReference?: string) {
+		if (!this.config.legacyEnabled || !siteInternalReference) {
+			return [];
+		}
+
+		const encodedSite = encodeURIComponent(siteInternalReference);
+		const json = await this.requestJson<unknown>(`/proxy/network/api/s/${encodedSite}/stat/sta`);
+		return collectionFromResponse<RawRecord>(json).items;
+	}
 }
 
 function siteIdFromRaw(site: RawRecord) {
