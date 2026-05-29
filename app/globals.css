@@ -1,0 +1,62 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+	--background: #f5f7fa;
+	--foreground: #111827;
+	--unifi-blue: #006fff;
+	--unifi-purple: #7c3aed;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	min-height: 100%;
+	background: var(--background);
+	color: var(--foreground);
+}
+
+body {
+	margin: 0;
+	font-family:
+		Inter,
+		ui-sans-serif,
+		system-ui,
+		-apple-system,
+		BlinkMacSystemFont,
+		"SF Pro Display",
+		"SF Pro Text",
+		"Segoe UI",
+		sans-serif;
+	text-rendering: geometricPrecision;
+}
+
+button,
+input,
+select,
+textarea {
+	font: inherit;
+}
+
+.thin-scrollbar {
+	scrollbar-width: thin;
+	scrollbar-color: #cbd5e1 transparent;
+}
+
+.thin-scrollbar::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-thumb {
+	background: #cbd5e1;
+	border-radius: 999px;
+}
+
+.thin-scrollbar::-webkit-scrollbar-track {
+	background: transparent;
+}
