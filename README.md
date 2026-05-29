@@ -1,6 +1,6 @@
 # SDC UniFi Office Dashboard
 
-這是一個給辦公室螢幕待機首頁使用的 UniFi 儀表板。
+這是一個 BambooFox / SDC 共用社辦投影機待機首頁使用的 UniFi 儀表板。
 
 畫面會顯示：
 
@@ -101,7 +101,7 @@ pnpm --version
 ```bash
 sudo mkdir -p /opt/unifi-ap-dashboard
 sudo chown "$USER":"$USER" /opt/unifi-ap-dashboard
-git clone <your-repo-url> /opt/unifi-ap-dashboard
+git clone https://github.com/NYCU-SDC/uxplay-unify-dashboard /opt/unifi-ap-dashboard
 cd /opt/unifi-ap-dashboard
 ```
 
