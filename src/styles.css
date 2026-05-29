@@ -1,4 +1,4 @@
-@tailwind base;
+@import url("https://font.emtech.cc/css/TASAOrbiter") @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -29,6 +29,7 @@ body {
 	margin: 0;
 	cursor: none;
 	font-family:
+		TASAOrbiter,
 		Inter,
 		ui-sans-serif,
 		system-ui,
