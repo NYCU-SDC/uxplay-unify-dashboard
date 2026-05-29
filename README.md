@@ -275,6 +275,7 @@ chromium \
   --kiosk \
   --start-fullscreen \
   --ozone-platform=wayland \
+  --force-device-scale-factor=0.85 \
   --noerrdialogs \
   --disable-infobars \
   --disable-session-crashed-bubble \
@@ -292,7 +293,7 @@ tee ~/.config/autostart/sdc-dashboard-kiosk.desktop >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=SDC Dashboard Kiosk
-Exec=sh -lc 'xset s off -dpms 2>/dev/null || true; chromium --kiosk --start-fullscreen --ozone-platform=wayland --noerrdialogs --disable-infobars --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch https://uxplay.sdc.nycu.club'
+Exec=sh -lc 'xset s off -dpms 2>/dev/null || true; chromium --kiosk --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 --noerrdialogs --disable-infobars --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch https://uxplay.sdc.nycu.club'
 X-GNOME-Autostart-enabled=true
 EOF
 ```
@@ -300,7 +301,7 @@ EOF
 手動測試：
 
 ```bash
-chromium --kiosk --start-fullscreen --ozone-platform=wayland https://uxplay.sdc.nycu.club
+chromium --kiosk --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 https://uxplay.sdc.nycu.club
 ```
 
 重開機：
@@ -321,7 +322,7 @@ curl https://uxplay.sdc.nycu.club/api/wallpaper
 手動啟動 kiosk 測試：
 
 ```bash
-chromium --kiosk --start-fullscreen --ozone-platform=wayland https://uxplay.sdc.nycu.club
+chromium --kiosk --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 https://uxplay.sdc.nycu.club
 ```
 
 常見問題：
