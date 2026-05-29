@@ -1,4 +1,6 @@
-@import url("https://font.emtech.cc/css/TASAOrbiter") @tailwind base;
+@import url("https://font.emtech.cc/css/TASAOrbiter");
+
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
