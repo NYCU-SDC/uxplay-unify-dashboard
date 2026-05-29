@@ -366,8 +366,16 @@ export class UniFiClient {
 		}
 
 		const encodedSite = encodeURIComponent(siteInternalReference);
-		const json = await this.requestJson<unknown>(`/proxy/network/api/s/${encodedSite}/stat/event?limit=20`, { cacheTtlMs: 15_000 });
-		return collectionFromResponse<RawRecord>(json).items;
+		try {
+			const json = await this.requestJson<unknown>(`/proxy/network/api/s/${encodedSite}/stat/event?limit=20`, { cacheTtlMs: 15_000 });
+			return collectionFromResponse<RawRecord>(json).items;
+		} catch (error) {
+			if (error instanceof UniFiApiError && error.status === 404) {
+				return [];
+			}
+
+			throw error;
+		}
 	}
 
 	async getLegacyClients(siteInternalReference?: string) {
