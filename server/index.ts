@@ -11,7 +11,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const distDir = path.join(rootDir, "dist");
 const isProduction = process.env.NODE_ENV === "production";
+const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 3000);
+const FOX_WALLPAPER_URL = "https://randomfox.ca/floof/";
+
+interface FoxWallpaper {
+	image: string;
+	link: string;
+	refreshedAt: string;
+}
+
+let lastWallpaper: FoxWallpaper | undefined;
 
 function fulfilledValue<T>(result: PromiseSettledResult<T>) {
 	return result.status === "fulfilled" ? result.value : undefined;
@@ -170,6 +180,51 @@ app.get("/api/unifi/dashboard", async (_request, response) => {
 	}
 });
 
+app.get("/api/wallpaper", async (_request, response) => {
+	const controller = new AbortController();
+	const timeout = setTimeout(() => controller.abort(), 8000);
+
+	try {
+		const wallpaperResponse = await fetch(FOX_WALLPAPER_URL, {
+			headers: {
+				Accept: "application/json"
+			},
+			cache: "no-store",
+			signal: controller.signal
+		});
+
+		if (!wallpaperResponse.ok) {
+			throw new Error(`randomfox returned ${wallpaperResponse.status}.`);
+		}
+
+		const payload = (await wallpaperResponse.json()) as Partial<FoxWallpaper>;
+		if (!payload.image || !payload.link || !payload.image.startsWith("https://randomfox.ca/")) {
+			throw new Error("randomfox returned an invalid wallpaper payload.");
+		}
+
+		lastWallpaper = {
+			image: payload.image,
+			link: payload.link,
+			refreshedAt: new Date().toISOString()
+		};
+		response.json(lastWallpaper);
+	} catch (error) {
+		if (lastWallpaper) {
+			response.json({
+				...lastWallpaper,
+				warning: toSafeErrorMessage(error)
+			});
+			return;
+		}
+
+		response.status(503).json({
+			error: toSafeErrorMessage(error)
+		});
+	} finally {
+		clearTimeout(timeout);
+	}
+});
+
 if (isProduction) {
 	app.use(express.static(distDir, { index: false }));
 	app.use((_request, response) => {
@@ -188,8 +243,8 @@ if (isProduction) {
 	app.use(vite.middlewares);
 }
 
-app.listen(port, "127.0.0.1", () => {
+app.listen(port, host, () => {
 	const mode = isProduction ? "production" : "development";
 	const staticStatus = isProduction ? (fs.existsSync(distDir) ? "serving dist" : "dist missing") : "vite middleware";
-	console.log(`UniFi dashboard ${mode} server listening on http://127.0.0.1:${port} (${staticStatus})`);
+	console.log(`UniFi dashboard ${mode} server listening on http://${host}:${port} (${staticStatus})`);
 });
