@@ -265,14 +265,30 @@ sudo raspi-config
 - `System Options -> Boot / Auto Login -> Desktop Autologin`
 - `Display Options -> Screen Blanking -> No`
 
-建立 labwc autostart。這裡刻意使用 `--app` 而不是 `--kiosk`，避免 Chromium 一直壓在 UxPlay 投影畫面上方：
+建立 Chromium wrapper。這裡刻意使用 `--app` 而不是 `--kiosk`，避免 Chromium 一直壓在 UxPlay 投影畫面上方；同時使用獨立 kiosk profile，避免開機時遇到 Chromium profile locked。`--password-store=basic` 和 `--use-mock-keychain` 是必要的，否則 autologin 後 Chromium 可能會觸發 GNOME Keyring 的「Default Keyring locked」密碼視窗：
 
 ```bash
-mkdir -p ~/.config/labwc
-tee ~/.config/labwc/autostart >/dev/null <<'EOF'
+mkdir -p ~/.local/bin
+tee ~/.local/bin/sdc-dashboard-kiosk >/dev/null <<'EOF'
 #!/bin/sh
+set -eu
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+unset GNOME_KEYRING_CONTROL GNOME_KEYRING_PID SSH_AUTH_SOCK
+
+loginctl unlock-session "${XDG_SESSION_ID:-}" 2>/dev/null || true
+pkill -x swaylock 2>/dev/null || true
+pkill -x gcr-prompter 2>/dev/null || true
+wlopm --on '*' 2>/dev/null || true
 xset s off -dpms 2>/dev/null || true
-chromium \
+
+profile_dir="${XDG_RUNTIME_DIR:-/tmp}/sdc-dashboard-chromium"
+mkdir -p "$profile_dir"
+rm -f "$profile_dir/SingletonLock" "$profile_dir/SingletonSocket" "$profile_dir/SingletonCookie" 2>/dev/null || true
+
+exec chromium \
+  --user-data-dir="$profile_dir" \
+  --password-store=basic \
+  --use-mock-keychain \
   --app=https://uxplay.sdc.nycu.club \
   --start-fullscreen \
   --ozone-platform=wayland \
@@ -282,8 +298,9 @@ chromium \
   --disable-infobars \
   --disable-session-crashed-bubble \
   --overscroll-history-navigation=0 \
-  --disable-pinch >/tmp/sdc-dashboard-kiosk.log 2>&1 &
+  --disable-pinch
 EOF
+chmod +x ~/.local/bin/sdc-dashboard-kiosk
 ```
 
 讓 Chromium dashboard 永遠在一般視窗底層，AirPlay 投影視窗出現時可以蓋到上面：
@@ -306,13 +323,7 @@ tee ~/.config/labwc/rc.xml >/dev/null <<'EOF'
 EOF
 ```
 
-目前 SDC 的 UxPlay user service 使用這個 command，投影視窗由 `waylandsink` 開 fullscreen：
-
-```ini
-ExecStart=/usr/bin/uxplay -p -fs -vs waylandsink -vsync no -as 0 -s 1024x768@60
-```
-
-同時建立 XDG autostart，讓 X11/LXDE 環境也能啟動：
+建立 XDG autostart。Chromium 只從這裡啟動一次，避免 labwc autostart 和 XDG autostart 同時開瀏覽器：
 
 ```bash
 mkdir -p ~/.config/autostart
@@ -320,15 +331,90 @@ tee ~/.config/autostart/sdc-dashboard-kiosk.desktop >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=SDC Dashboard Kiosk
-Exec=sh -lc 'xset s off -dpms 2>/dev/null || true; chromium --app=https://uxplay.sdc.nycu.club --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85 --no-first-run --noerrdialogs --disable-infobars --disable-session-crashed-bubble --overscroll-history-navigation=0 --disable-pinch >/tmp/sdc-dashboard-kiosk.log 2>&1'
+Exec=/home/sdc/.local/bin/sdc-dashboard-kiosk >/tmp/sdc-dashboard-kiosk.log 2>&1
 X-GNOME-Autostart-enabled=true
 EOF
+```
+
+建立 labwc autostart，只負責關閉螢幕鎖定/休眠，不在這裡再啟動 Chromium：
+
+```bash
+mkdir -p ~/.config/labwc
+tee ~/.config/labwc/autostart >/dev/null <<'EOF'
+#!/bin/sh
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+(
+  for delay in 0 2 10; do
+    sleep "$delay"
+    loginctl unlock-session "${XDG_SESSION_ID:-}" 2>/dev/null || true
+    pkill -x swaylock 2>/dev/null || true
+    wlopm --on '*' 2>/dev/null || true
+    xset s off -dpms 2>/dev/null || true
+  done
+) &
+EOF
+chmod +x ~/.config/labwc/autostart
+```
+
+停用 GNOME Keyring。這台 Pi 是 kiosk，會自動登入，keyring 不會被登入密碼解鎖；如果不關掉，Chromium 或其他 app 可能在開機後跳出 `Unlock Keyring` 視窗：
+
+```bash
+mkdir -p ~/.config/autostart
+for name in gnome-keyring-pkcs11.desktop gnome-keyring-secrets.desktop gnome-keyring-ssh.desktop; do
+  tee ~/.config/autostart/$name >/dev/null <<EOF
+[Desktop Entry]
+Type=Application
+Name=Disabled $name
+Hidden=true
+EOF
+done
+
+systemctl --user disable --now gnome-keyring-daemon.service gnome-keyring-daemon.socket 2>/dev/null || true
+systemctl --user mask gnome-keyring-daemon.service gnome-keyring-daemon.socket 2>/dev/null || true
+pkill -x gnome-keyring-d 2>/dev/null || true
+pkill -x gcr-prompter 2>/dev/null || true
+```
+
+讓 kiosk session 裡的 `swaylock` 變成 no-op，並建立常駐 guard，避免開機或閒置後出現 locked/password/keyring 畫面：
+
+```bash
+tee ~/.local/bin/swaylock >/dev/null <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x ~/.local/bin/swaylock
+
+mkdir -p ~/.config/systemd/user
+tee ~/.config/systemd/user/kiosk-no-lock.service >/dev/null <<'EOF'
+[Unit]
+Description=Prevent kiosk display lock and keyring prompts
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh -lc 'while :; do uid="$(id -u)"; loginctl list-sessions --no-legend | while read -r sid suid user seat rest; do [ "$suid" = "$uid" ] && [ "$seat" = "seat0" ] && loginctl unlock-session "$sid" 2>/dev/null || true; done; pkill -x swaylock 2>/dev/null || true; pkill -x gcr-prompter 2>/dev/null || true; pkill -x gnome-keyring-d 2>/dev/null || true; wlopm --on "*" 2>/dev/null || true; sleep 5; done'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+
+systemctl --user daemon-reload
+systemctl --user enable --now kiosk-no-lock.service
+```
+
+目前 SDC 的 UxPlay user service 使用這個 command，投影視窗由 `waylandsink` 開 fullscreen：
+
+```ini
+ExecStart=/usr/bin/uxplay -p -fs -vs waylandsink -vsync no -as 0 -s 1024x768@60
 ```
 
 手動測試：
 
 ```bash
-chromium --app=https://uxplay.sdc.nycu.club --start-fullscreen --ozone-platform=wayland --force-device-scale-factor=0.85
+~/.local/bin/sdc-dashboard-kiosk
 ```
 
 重開機：
@@ -356,7 +442,9 @@ chromium --app=https://uxplay.sdc.nycu.club --start-fullscreen --ozone-platform=
 
 - 黑畫面：先確認 Raspberry Pi 可以 `curl` dashboard URL。
 - 沒有自動開：確認 `~/.config/autostart/sdc-dashboard-kiosk.desktop` 是否存在。
-- 螢幕休眠：確認 `raspi-config` 的 screen blanking 已關閉，也確認 autostart 有 `xset s off -dpms`。
+- 開機出現 `Unlock Keyring`：確認 Chromium wrapper 有 `--password-store=basic` / `--use-mock-keychain`，並確認 `systemctl --user is-enabled gnome-keyring-daemon.service gnome-keyring-daemon.socket` 顯示 `masked`。
+- 開機出現 locked/password：確認 `systemctl --user status kiosk-no-lock.service` 是 `active`，並確認 `~/.local/bin/swaylock` 存在。
+- 螢幕休眠：確認 `raspi-config` 的 screen blanking 已關閉，也確認 labwc autostart 有 `wlopm --on '*'` 和 `xset s off -dpms`。
 - Chromium 顯示壞掉：Raspberry Pi OS Bookworm 可嘗試切回 X11，或檢查 `/tmp/sdc-dashboard-kiosk.log`。
 
 ## 本機開發
